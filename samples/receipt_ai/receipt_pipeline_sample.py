@@ -14,6 +14,7 @@ All data below is synthetic. The AI call itself is replaced by a fixed answer;
 the real prompt is not part of this repository.
 
 Run:  python receipt_pipeline_sample.py
+      python receipt_pipeline_sample.py --self-test
 """
 
 from __future__ import annotations
@@ -171,6 +172,12 @@ class Validation:
     warnings: list[str] = field(default_factory=list)
 
 
+def leading4_candidate(row: dict, texts: dict[str, str]) -> bool:
+    """True when the amount appears on a cited line and never with a yen sign."""
+    hits = [yen for i in row["evidence"] for v, yen in amounts_in(texts[i]) if v == row["amount"]]
+    return bool(hits) and not any(hits)
+
+
 def validate(answer: dict, ai_input: dict) -> Validation:
     texts = {ln["id"]: ln["text"] for lines in ai_input.values() for ln in lines}
     warnings: list[str] = []
@@ -188,11 +195,15 @@ def validate(answer: dict, ai_input: dict) -> Validation:
     total = answer.get("total")
     item_sum = sum(r["amount"] for r in items)
     if total is not None and items and item_sum != total:
-        # Try the yen->4 fix on items whose evidence line has no yen sign.
+        # Try the yen->4 fix only on items whose amount is printed WITHOUT a
+        # yen sign on every cited line: if a line shows "¥4120", the 4 is a
+        # real digit and the amount must not be changed.
         fixed = False
         for r in items:
             alt = leading4_alternative(r["amount"])
-            if alt is not None and item_sum - r["amount"] + alt == total:
+            if alt is None or not leading4_candidate(r, texts):
+                continue
+            if item_sum - r["amount"] + alt == total:
                 warnings.append(f"leading4_fixed:{r['name']}:{r['amount']}->{alt}")
                 r["amount"] = alt
                 fixed = True
@@ -247,5 +258,26 @@ def demo() -> None:
     print("warnings:", result.warnings)
 
 
+def self_test() -> None:
+    """The yen->4 fix applies to a line without a yen sign, not to one with it."""
+    def single_line(text: str) -> dict:
+        return {"M": [{"id": "M1", "text": text, "box": [0, 0, 1000, 100]}]}
+
+    answer = {"items": [{"name": "りんご", "amount": 4120, "evidence": ["M1"]}], "total": 120}
+    no_yen = validate(json.loads(json.dumps(answer)), single_line("りんご 4120"))
+    assert no_yen.items[0]["amount"] == 120, no_yen
+    assert "leading4_fixed:りんご:4120->120" in no_yen.warnings
+
+    with_yen = validate(json.loads(json.dumps(answer)), single_line("りんご ¥4120"))
+    assert with_yen.items[0]["amount"] == 4120, with_yen
+    assert "total_mismatch" in with_yen.warnings
+    print("self-test: 2/2 passed (line without ¥ fixed, line with ¥ kept)")
+
+
 if __name__ == "__main__":
-    demo()
+    import sys
+    if "--self-test" in sys.argv:
+        sys.stdout.reconfigure(encoding="utf-8")
+        self_test()
+    else:
+        demo()

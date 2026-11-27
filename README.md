@@ -75,9 +75,14 @@ flowchart LR
 
 ```sh
 python samples/receipt_ai/receipt_pipeline_sample.py
+python samples/receipt_ai/receipt_pipeline_sample.py --self-test
 python samples/receipt_ai/eval_sample.py
 python samples/agent_gate/guard_sample.py --self-test
 ```
+
+## ライセンス
+
+サンプルコードと文書は [MIT License](LICENSE) です。
 
 ## 公開していないもの
 
